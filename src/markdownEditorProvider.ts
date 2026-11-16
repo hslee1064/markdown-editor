@@ -94,10 +94,30 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           type: 'init',
           text: document.getText(),
           baseUri: docDir ? panel.webview.asWebviewUri(docDir).toString() : '',
+          view: this.getViewState(document.uri),
         });
       }
+      if (msg.type === 'view') this.saveViewState(document.uri, msg.view);
       if (msg.type === 'edit') applyText(msg.text);
     });
+  }
+
+  // Last viewed position per file, kept across sessions (most recent 200 files).
+  private static readonly VIEW_KEY = 'markdownEditor.viewState';
+
+  private getViewState(uri: vscode.Uri): unknown {
+    const all = this.context.globalState.get<Record<string, { t: number }>>(MarkdownEditorProvider.VIEW_KEY, {});
+    return all[uri.toString()];
+  }
+
+  private saveViewState(uri: vscode.Uri, view: object): void {
+    const all = { ...this.context.globalState.get<Record<string, { t: number }>>(MarkdownEditorProvider.VIEW_KEY, {}) };
+    all[uri.toString()] = { ...view, t: Date.now() };
+    const keys = Object.keys(all);
+    if (keys.length > 200) {
+      keys.sort((a, b) => all[a].t - all[b].t).slice(0, keys.length - 200).forEach(k => delete all[k]);
+    }
+    void this.context.globalState.update(MarkdownEditorProvider.VIEW_KEY, all);
   }
 
   private getHtml(webview: vscode.Webview, media: vscode.Uri): string {

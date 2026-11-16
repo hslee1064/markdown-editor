@@ -248,7 +248,7 @@ const editor: Editor = new Editor({
     if (transaction.getMeta('fromHost')) return;
     blockShortcut(); send(getMarkdown()); updateSlash();
   },
-  onSelectionUpdate: () => { updateUi(); updateSlash(); },
+  onSelectionUpdate: () => { updateUi(); updateSlash(); saveView(); },
   onTransaction: ({ transaction }) => { updateUi(); if (transaction.docChanged && !$('#find').hidden) updateFindLabel(); },
 });
 
@@ -276,7 +276,48 @@ window.addEventListener('message', e => {
   const msg = e.data;
   if (msg.type === 'init') baseUri = msg.baseUri ?? '';
   if (msg.type === 'init' || msg.type === 'update') setFromHost(msg.text);
+  if (msg.type === 'init' && msg.view) restoreView(msg.view);
 });
+
+/* ---------- Remember last viewed position ----------
+   Saved as document positions (not pixels) so it survives window resizes. */
+type ViewState = { top: number; from: number; to: number };
+const scroller = $('#wysiwyg');
+let viewReady = false;
+let viewTimer: number | undefined;
+
+function topPos(): number {
+  const r = scroller.getBoundingClientRect();
+  const hit = editor.view.posAtCoords({ left: r.left + 60, top: r.top + 8 });
+  return hit ? hit.pos : 0;
+}
+function saveView() {
+  if (!viewReady) return;
+  clearTimeout(viewTimer);
+  viewTimer = window.setTimeout(() => {
+    const { from, to } = editor.state.selection;
+    const view: ViewState = { top: scroller.scrollTop < 4 ? 0 : topPos(), from, to };
+    vscode.postMessage({ type: 'view', view });
+  }, 300);
+}
+function restoreView(v: ViewState) {
+  const max = editor.state.doc.content.size;
+  const clamp = (n: number) => Math.max(0, Math.min(n ?? 0, max));
+  try { editor.chain().setMeta('addToHistory', false).setTextSelection({ from: clamp(v.from), to: clamp(v.to) }).run(); } catch { /* ignore */ }
+  // Wait for layout before scrolling.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (v.top > 0) {
+      try {
+        const c = editor.view.coordsAtPos(clamp(v.top));
+        scroller.scrollTop += c.top - scroller.getBoundingClientRect().top - 8;
+      } catch { /* ignore */ }
+    }
+    editor.view.focus();
+    viewReady = true;
+  }));
+}
+scroller.addEventListener('scroll', saveView, { passive: true });
+window.addEventListener('message', e => { if (e.data?.type === 'init' && !e.data.view) viewReady = true; });
 
 /* ---------- Commands ---------- */
 const chain = () => editor.chain().focus();
