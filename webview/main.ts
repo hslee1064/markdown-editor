@@ -1,4 +1,4 @@
-import { Editor, Extension } from '@tiptap/core';
+import { Editor, Extension, createDocument } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
@@ -192,7 +192,7 @@ function applyWidths(widths: (number[] | null)[]) {
     }
     return false;
   });
-  if (tr.docChanged) editor.view.dispatch(tr.setMeta('addToHistory', false));
+  if (tr.docChanged) editor.view.dispatch(tr.setMeta('addToHistory', false).setMeta('fromHost', true));
 }
 
 function writeWidths(md: string): string {
@@ -244,19 +244,33 @@ const editor: Editor = new Editor({
       return (editor.storage as any).markdown.serializer.serialize(slice.content);
     },
   },
-  onUpdate: () => { blockShortcut(); send(getMarkdown()); updateSlash(); },
+  onUpdate: ({ transaction }) => {
+    if (transaction.getMeta('fromHost')) return;
+    blockShortcut(); send(getMarkdown()); updateSlash();
+  },
   onSelectionUpdate: () => { updateUi(); updateSlash(); },
   onTransaction: ({ transaction }) => { updateUi(); if (transaction.docChanged && !$('#find').hidden) updateFindLabel(); },
 });
 
 const setFromHost = (text: string) => {
   clearTimeout(timer);
-  lastText = text;
-  if (getMarkdown() !== text) {
-    // External changes must not land in the editor's own undo history.
-    editor.chain().setMeta('addToHistory', false).setContent(text, false).run();
-    applyWidths(readWidths(text));
+  // Replace only the part that actually differs, so the cursor and scroll stay put. A full
+  // setContent would move the cursor to the end even for trivial changes (e.g. a final newline
+  // added on save).
+  const html = (editor.storage as any).markdown.parser.parse(text);
+  const next = createDocument(html, editor.schema);
+  const cur = editor.state.doc;
+  const start = cur.content.findDiffStart(next.content);
+  if (start != null) {
+    let { a, b } = cur.content.findDiffEnd(next.content)!;
+    const overlap = start - Math.min(a, b);
+    if (overlap > 0) { a += overlap; b += overlap; }
+    editor.view.dispatch(editor.state.tr.replace(start, a, next.slice(start, b))
+      .setMeta('addToHistory', false).setMeta('fromHost', true));
   }
+  applyWidths(readWidths(text));
+  // Whatever the editor now serializes to is in sync with the host; don't echo it back.
+  lastText = getMarkdown();
 };
 window.addEventListener('message', e => {
   const msg = e.data;

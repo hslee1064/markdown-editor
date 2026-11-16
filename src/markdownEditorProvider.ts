@@ -43,11 +43,29 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     panel.webview.options = { enableScripts: true, localResourceRoots: roots };
     panel.webview.html = this.getHtml(panel.webview, mediaUri);
 
-    let applyingEdit = false;
+    // Texts the webview sent that may still come back as change events. Matching events are our own
+    // echo and must not be sent back, or they would overwrite newer typing in the webview.
+    const ownTexts: string[] = [];
     const changeSub = vscode.workspace.onDidChangeTextDocument(e => {
-      if (e.document.uri.toString() !== document.uri.toString() || applyingEdit) return;
-      panel.webview.postMessage({ type: 'update', text: document.getText() });
+      if (e.document.uri.toString() !== document.uri.toString() || e.contentChanges.length === 0) return;
+      const text = document.getText();
+      const i = ownTexts.indexOf(text);
+      if (i !== -1) { ownTexts.splice(0, i + 1); return; }
+      panel.webview.postMessage({ type: 'update', text });
     });
+
+    // Apply webview edits one at a time, in order.
+    let queue: Promise<unknown> = Promise.resolve();
+    const applyText = (text: string) => {
+      queue = queue.then(async () => {
+        if (text === document.getText()) return;
+        ownTexts.push(text);
+        if (ownTexts.length > 50) ownTexts.shift();
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), text);
+        await vscode.workspace.applyEdit(edit);
+      }).catch(() => undefined);
+    };
 
     // Watch the file on disk too, so changes made by other programs show up immediately.
     const disposables: vscode.Disposable[] = [changeSub];
@@ -56,8 +74,10 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(docDir, name));
       const reload = async () => {
         if (document.isDirty) return; // don't clobber unsaved edits
+        const version = document.version;
         const disk = new TextDecoder().decode(await vscode.workspace.fs.readFile(document.uri));
-        if (disk === document.getText()) return;
+        // Our own (auto)save, or the user kept typing while we read: nothing to do.
+        if (disk === document.getText() || document.version !== version || document.isDirty) return;
         const edit = new vscode.WorkspaceEdit();
         edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), disk);
         await vscode.workspace.applyEdit(edit); // fires onDidChangeTextDocument -> webview update
@@ -68,7 +88,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     }
     panel.onDidDispose(() => disposables.forEach(d => d.dispose()));
 
-    panel.webview.onDidReceiveMessage(async msg => {
+    panel.webview.onDidReceiveMessage(msg => {
       if (msg.type === 'ready') {
         panel.webview.postMessage({
           type: 'init',
@@ -76,12 +96,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           baseUri: docDir ? panel.webview.asWebviewUri(docDir).toString() : '',
         });
       }
-      if (msg.type === 'edit' && msg.text !== document.getText()) {
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), msg.text);
-        applyingEdit = true;
-        try { await vscode.workspace.applyEdit(edit); } finally { applyingEdit = false; }
-      }
+      if (msg.type === 'edit') applyText(msg.text);
     });
   }
 
