@@ -28,7 +28,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     return vscode.window.registerCustomEditorProvider(
       MarkdownEditorProvider.viewType,
       new MarkdownEditorProvider(context),
-      { webviewOptions: { retainContextWhenHidden: true } }
+      { webviewOptions: { retainContextWhenHidden: true, enableFindWidget: true } }
     );
   }
 
