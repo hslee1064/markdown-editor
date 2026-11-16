@@ -33,6 +33,13 @@ Notion처럼 입력하는 즉시 서식이 적용되는 VS Code용 WYSIWYG Markd
 - `.md` 기준 상대 경로 이미지 표시
 - VS Code 테마 색상과 에디터 폰트 크기 자동 적용
 
+**찾기 · 위치 기억 · PDF**
+- `Cmd/Ctrl+F` 찾기: 일치 항목 하이라이트, 개수 표시, `Enter`/`Shift+Enter` 이동, 대소문자 구분
+- 파일을 다시 열면 마지막으로 보던 위치와 커서로 복원
+- **PDF 내보내기**: 에디터 상단의 PDF 아이콘 또는 명령 팔레트 → **Markdown Editor: Export to PDF**
+  - 화면에 보이는 그대로(문법 하이라이팅, 표 너비, 체크박스 포함) 밝은 인쇄용 테마의 A4 PDF로 저장
+  - 설치된 Chrome / Edge / Chromium을 자동으로 찾아 사용하며, 찾지 못하면 `markdownEditor.pdf.browserPath`로 경로 지정
+
 ## 표 열 너비 저장 방식
 
 Markdown에는 열 너비 문법이 없기 때문에, 구분선의 `-` 개수로 너비를 저장합니다(1개 = 10px).
@@ -77,7 +84,8 @@ VS Code에서 이 폴더를 열고 `F5`로 Extension Development Host를 실행�
 ```
 src/
   extension.ts               확장 진입점, 명령 등록
-  markdownEditorProvider.ts  CustomTextEditor: 웹뷰 HTML, 문서 동기화, 파일 감시
+  markdownEditorProvider.ts  CustomTextEditor: 웹뷰 HTML, 문서 동기화, 파일 감시, 위치 기억
+  pdfExport.ts               PDF 내보내기 (headless Chromium)
 webview/
   main.ts                    TipTap 에디터, 슬래시 메뉴, 단축 입력, 표 너비 저장
 media/

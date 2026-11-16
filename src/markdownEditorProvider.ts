@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { buildPrintHtml, findBrowser, printToPdf } from './pdfExport';
 
 const svg = (d: string) =>
   `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -25,11 +29,61 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'markdownEditor.editor';
 
   static register(context: vscode.ExtensionContext): vscode.Disposable {
-    return vscode.window.registerCustomEditorProvider(
-      MarkdownEditorProvider.viewType,
-      new MarkdownEditorProvider(context),
-      { webviewOptions: { retainContextWhenHidden: true } }
+    const provider = new MarkdownEditorProvider(context);
+    return vscode.Disposable.from(
+      vscode.window.registerCustomEditorProvider(MarkdownEditorProvider.viewType, provider,
+        { webviewOptions: { retainContextWhenHidden: true } }),
+      vscode.commands.registerCommand('markdownEditor.exportPdf', () => provider.exportActivePdf()),
     );
+  }
+
+  private readonly panels = new Set<{ panel: vscode.WebviewPanel; document: vscode.TextDocument; docDir?: vscode.Uri }>();
+  private readonly pendingHtml = new Map<string, (html: string) => void>();
+
+  /** Export the focused editor's rendered content to PDF via a headless Chromium browser. */
+  async exportActivePdf(): Promise<void> {
+    const entry = [...this.panels].find(e => e.panel.active);
+    if (!entry) { vscode.window.showWarningMessage('Open a Markdown file in Markdown Editor first.'); return; }
+    const browser = findBrowser();
+    if (!browser) {
+      const pick = await vscode.window.showErrorMessage(
+        'PDF export needs Google Chrome, Microsoft Edge or Chromium. Install one, or set "markdownEditor.pdf.browserPath".',
+        'Open Settings');
+      if (pick) vscode.commands.executeCommand('workbench.action.openSettings', 'markdownEditor.pdf.browserPath');
+      return;
+    }
+    const { panel, document, docDir } = entry;
+    const base = document.uri.scheme === 'file' ? document.uri.fsPath.replace(/\.(md|markdown)$/i, '') : path.join(os.homedir(), 'Untitled');
+    const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(base + '.pdf'), filters: { PDF: ['pdf'] } });
+    if (!target) return;
+
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Exporting PDF…' }, async () => {
+      const id = randomBytes(8).toString('hex');
+      let body = await new Promise<string>((resolve, reject) => {
+        const t = setTimeout(() => { this.pendingHtml.delete(id); reject(new Error('Editor did not respond')); }, 10_000);
+        this.pendingHtml.set(id, html => { clearTimeout(t); resolve(html); });
+        panel.webview.postMessage({ type: 'exportHtml', id });
+      });
+      // Point images at the files on disk instead of the webview resource URLs.
+      if (docDir) {
+        const webBase = panel.webview.asWebviewUri(docDir).toString();
+        body = body.split(webBase).join(docDir.toString());
+      }
+      const css = fs.readFileSync(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.css').fsPath, 'utf8');
+      const title = path.basename(document.uri.path);
+      const tmp = path.join(os.tmpdir(), `markdown-editor-${id}.html`);
+      fs.writeFileSync(tmp, buildPrintHtml(body, title, css), 'utf8');
+      try {
+        if (fs.existsSync(target.fsPath)) fs.unlinkSync(target.fsPath);
+        await printToPdf(browser, tmp, target.fsPath);
+      } finally {
+        fs.rmSync(tmp, { force: true });
+      }
+    }).then(async () => {
+      const open = await vscode.window.showInformationMessage(`Exported ${path.basename(target.fsPath)}`, 'Open', 'Reveal in Finder');
+      if (open === 'Open') vscode.env.openExternal(target);
+      else if (open) vscode.commands.executeCommand('revealFileInOS', target);
+    }, err => vscode.window.showErrorMessage(`PDF export failed: ${err?.message ?? err}`));
   }
 
   constructor(private readonly context: vscode.ExtensionContext) {}
@@ -86,7 +140,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       watcher.onDidChange(() => reload().catch(() => undefined));
       disposables.push(watcher);
     }
-    panel.onDidDispose(() => disposables.forEach(d => d.dispose()));
+    const entry = { panel, document, docDir };
+    this.panels.add(entry);
+    panel.onDidDispose(() => { this.panels.delete(entry); disposables.forEach(d => d.dispose()); });
 
     panel.webview.onDidReceiveMessage(msg => {
       if (msg.type === 'ready') {
@@ -98,6 +154,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         });
       }
       if (msg.type === 'view') this.saveViewState(document.uri, msg.view);
+      if (msg.type === 'exportHtml') { this.pendingHtml.get(msg.id)?.(msg.html); this.pendingHtml.delete(msg.id); }
       if (msg.type === 'edit') applyText(msg.text);
     });
   }

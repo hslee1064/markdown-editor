@@ -277,6 +277,7 @@ window.addEventListener('message', e => {
   if (msg.type === 'init') baseUri = msg.baseUri ?? '';
   if (msg.type === 'init' || msg.type === 'update') setFromHost(msg.text);
   if (msg.type === 'init' && msg.view) restoreView(msg.view);
+  if (msg.type === 'exportHtml') vscode.postMessage({ type: 'exportHtml', id: msg.id, html: exportHtml() });
 });
 
 /* ---------- Remember last viewed position ----------
@@ -318,6 +319,24 @@ function restoreView(v: ViewState) {
 }
 scroller.addEventListener('scroll', saveView, { passive: true });
 window.addEventListener('message', e => { if (e.data?.type === 'init' && !e.data.view) viewReady = true; });
+
+/* ---------- PDF export: snapshot of the rendered document (keeps syntax highlighting) ---------- */
+function exportHtml(): string {
+  const root = editor.view.dom.cloneNode(true) as HTMLElement;
+  root.querySelectorAll('.lang, .column-resize-handle, .ProseMirror-gapcursor, .ProseMirror-separator, .ProseMirror-trailingBreak').forEach(el => el.remove());
+  root.querySelectorAll('.find-match').forEach(el => el.replaceWith(...Array.from(el.childNodes)));
+  root.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+  root.querySelectorAll('.is-empty, .is-editor-empty').forEach(el => el.classList.remove('is-empty', 'is-editor-empty'));
+  root.querySelectorAll('[data-placeholder]').forEach(el => el.removeAttribute('data-placeholder'));
+  root.querySelectorAll('.selectedCell, .ProseMirror-selectednode').forEach(el => el.classList.remove('selectedCell', 'ProseMirror-selectednode'));
+  // Checkbox state lives in a DOM property, which innerHTML doesn't serialize.
+  root.querySelectorAll('li[data-checked]').forEach(li => {
+    const box = li.querySelector('input[type="checkbox"]');
+    if (box && li.getAttribute('data-checked') === 'true') box.setAttribute('checked', '');
+    box?.setAttribute('disabled', '');
+  });
+  return root.innerHTML;
+}
 
 /* ---------- Commands ---------- */
 const chain = () => editor.chain().focus();

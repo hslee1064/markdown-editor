@@ -30,6 +30,12 @@
         "command": "markdownEditor.open",
         "title": "Open in Markdown Editor",
         "icon": "$(preview)"
+      },
+      {
+        "command": "markdownEditor.exportPdf",
+        "title": "Export to PDF",
+        "category": "Markdown Editor",
+        "icon": "$(file-pdf)"
       }
     ],
     "menus": {
@@ -38,8 +44,29 @@
           "command": "markdownEditor.open",
           "when": "resourceLangId == markdown",
           "group": "navigation"
+        },
+        {
+          "command": "markdownEditor.exportPdf",
+          "when": "activeCustomEditorId == markdownEditor.editor",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "markdownEditor.exportPdf",
+          "when": "activeCustomEditorId == markdownEditor.editor"
         }
       ]
+    },
+    "configuration": {
+      "title": "Markdown Editor",
+      "properties": {
+        "markdownEditor.pdf.browserPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a Chromium-based browser (Chrome, Edge, Chromium) used for PDF export. Leave empty to detect automatically."
+        }
+      }
     }
   },
   "scripts": {
