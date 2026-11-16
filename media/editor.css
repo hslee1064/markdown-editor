@@ -58,7 +58,7 @@ button.on { background: color-mix(in srgb, var(--accent) 18%, transparent) !impo
 /* ---------- Document ---------- */
 .main { flex: 1; display: flex; min-height: 0; }
 #wysiwyg { flex: 1; overflow: auto; box-sizing: border-box; }
-#wysiwyg .ProseMirror { padding: 12px 56px 50vh; outline: none; min-height: 100%; box-sizing: border-box; }
+#wysiwyg .ProseMirror { padding: 12px 56px 120px; outline: none; min-height: 100%; box-sizing: border-box; }
 .ProseMirror ::selection { background: var(--vscode-editor-selectionBackground); }
 .ProseMirror .is-empty::before { content: attr(data-placeholder); color: var(--vscode-input-placeholderForeground, var(--muted)); opacity: .7; float: left; height: 0; pointer-events: none; }
 
