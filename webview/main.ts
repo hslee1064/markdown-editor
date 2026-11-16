@@ -71,6 +71,11 @@ const CodeBlock = CodeBlockLowlight.extend({
 /* ---------- Sync with the host document ---------- */
 let lastText = '';
 let timer: number | undefined;
+const flush = () => {
+  clearTimeout(timer);
+  const text = getMarkdown();
+  if (text !== lastText) { lastText = text; vscode.postMessage({ type: 'edit', text }); }
+};
 const send = (text: string) => {
   clearTimeout(timer);
   timer = window.setTimeout(() => {
@@ -179,7 +184,7 @@ const editor: Editor = new Editor({
     Markdown.configure({ html: false, linkify: true, transformPastedText: true, transformCopiedText: true, tightLists: true }),
   ],
   editorProps: {
-    handleKeyDown: (_v, e) => slashKey(e) || tableShortcut(e),
+    handleKeyDown: (_v, e) => undoRedoKey(e) || slashKey(e) || tableShortcut(e),
     // Copying inside a code block yields just the code, not a fenced ``` block.
     clipboardTextSerializer: (slice, view): string => {
       const { $from, $to } = view.state.selection;
@@ -198,7 +203,8 @@ const setFromHost = (text: string) => {
   clearTimeout(timer);
   lastText = text;
   if (getMarkdown() !== text) {
-    editor.commands.setContent(text, false);
+    // External changes must not land in the editor's own undo history.
+    editor.chain().setMeta('addToHistory', false).setContent(text, false).run();
     applyWidths(readWidths(text));
   }
 };
@@ -335,6 +341,22 @@ function slashKey(e: KeyboardEvent): boolean {
 }
 window.addEventListener('blur', closeSlash);
 $('#wysiwyg').addEventListener('scroll', closeSlash);
+
+/* ---------- Undo / redo ----------
+   VS Code's webview wrapper forwards every Cmd/Ctrl+Z/Y to the workbench, which also undoes the
+   TextDocument. Doing both makes the two histories fight. Handle it here and stop the event before
+   it bubbles to the window listener that forwards it. */
+function undoRedoKey(e: KeyboardEvent): boolean {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return false;
+  const k = e.key.toLowerCase();
+  const isUndo = k === 'z' && !e.shiftKey;
+  const isRedo = (k === 'z' && e.shiftKey) || (k === 'y' && !e.shiftKey);
+  if (!isUndo && !isRedo) return false;
+  e.stopPropagation();
+  if (isUndo) editor.commands.undo(); else editor.commands.redo();
+  flush();
+  return true;
+}
 
 /* ---------- Markdown block shortcuts that also work with IME (e.g. Korean) input ----------
    ProseMirror input rules don't run for composed input, so re-check after every update. */
