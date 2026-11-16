@@ -1,4 +1,6 @@
-import { Editor } from '@tiptap/core';
+import { Editor, Extension } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
@@ -65,6 +67,53 @@ const CodeBlock = CodeBlockLowlight.extend({
         ignoreMutation: m => select.contains(m.target as Node),
       };
     };
+  },
+});
+
+/* ---------- Find (Cmd/Ctrl+F) ---------- */
+type Match = { from: number; to: number };
+const findKey = new PluginKey<DecorationSet>('find');
+const find = { query: '', caseSensitive: false, matches: [] as Match[], index: -1 };
+
+function computeMatches(doc: import('@tiptap/pm/model').Node): Match[] {
+  if (!find.query) return [];
+  const q = find.caseSensitive ? find.query : find.query.toLowerCase();
+  const out: Match[] = [];
+  doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    // Map each character of the block's text back to a document position.
+    let text = '';
+    const map: number[] = [];
+    node.forEach((child, off) => {
+      if (child.isText) for (let i = 0; i < child.text!.length; i++) { text += child.text![i]; map.push(pos + 1 + off + i); }
+      else { text += '\ufffc'; map.push(pos + 1 + off); }
+    });
+    const hay = find.caseSensitive ? text : text.toLowerCase();
+    for (let i = hay.indexOf(q); i !== -1; i = hay.indexOf(q, i + q.length)) {
+      out.push({ from: map[i], to: map[i + q.length - 1] + 1 });
+    }
+    return false;
+  });
+  return out;
+}
+
+const FindHighlight = Extension.create({
+  name: 'findHighlight',
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: findKey,
+      state: {
+        init: () => DecorationSet.empty,
+        apply: (tr, old) => {
+          if (!tr.docChanged && !tr.getMeta(findKey)) return old;
+          find.matches = computeMatches(tr.doc);
+          if (find.index >= find.matches.length) find.index = find.matches.length - 1;
+          return DecorationSet.create(tr.doc, find.matches.map((m, i) =>
+            Decoration.inline(m.from, m.to, { class: i === find.index ? 'find-match current' : 'find-match' })));
+        },
+      },
+      props: { decorations: state => findKey.getState(state) },
+    })];
   },
 });
 
@@ -173,6 +222,7 @@ const editor: Editor = new Editor({
     CodeBlock.configure({ lowlight, defaultLanguage: null }),
     Link.configure({ openOnClick: false, autolink: true }),
     LocalImage,
+    FindHighlight,
     TaskList,
     TaskItem.configure({ nested: true }),
     Table.configure({ resizable: true, cellMinWidth: 40 }),
@@ -184,7 +234,7 @@ const editor: Editor = new Editor({
     Markdown.configure({ html: false, linkify: true, transformPastedText: true, transformCopiedText: true, tightLists: true }),
   ],
   editorProps: {
-    handleKeyDown: (_v, e) => undoRedoKey(e) || slashKey(e) || tableShortcut(e),
+    handleKeyDown: (_v, e) => findKeyDown(e) || undoRedoKey(e) || slashKey(e) || tableShortcut(e),
     // Copying inside a code block yields just the code, not a fenced ``` block.
     clipboardTextSerializer: (slice, view): string => {
       const { $from, $to } = view.state.selection;
@@ -196,7 +246,7 @@ const editor: Editor = new Editor({
   },
   onUpdate: () => { blockShortcut(); send(getMarkdown()); updateSlash(); },
   onSelectionUpdate: () => { updateUi(); updateSlash(); },
-  onTransaction: () => updateUi(),
+  onTransaction: ({ transaction }) => { updateUi(); if (transaction.docChanged && !$('#find').hidden) updateFindLabel(); },
 });
 
 const setFromHost = (text: string) => {
@@ -341,6 +391,90 @@ function slashKey(e: KeyboardEvent): boolean {
 }
 window.addEventListener('blur', closeSlash);
 $('#wysiwyg').addEventListener('scroll', closeSlash);
+
+/* ---------- Find bar UI ---------- */
+const findBar = $('#find'), findInput = $<HTMLInputElement>('#find-input'), findCount = $('#find-count');
+const findCase = $<HTMLButtonElement>('#find-case');
+
+function refreshFind(scroll = false) {
+  editor.view.dispatch(editor.state.tr.setMeta(findKey, true).setMeta('addToHistory', false));
+  updateFindLabel();
+  if (scroll && find.index >= 0) {
+    const m = find.matches[find.index];
+    const dom = editor.view.domAtPos(m.from).node as HTMLElement;
+    (dom.nodeType === 1 ? dom : dom.parentElement)?.scrollIntoView({ block: 'center' });
+  }
+}
+function updateFindLabel() {
+  const n = find.matches.length;
+  findCount.textContent = !find.query ? 'No results' : n ? `${find.index + 1} of ${n}` : 'No results';
+  findBar.classList.toggle('none', !!find.query && !n);
+}
+function step(dir: 1 | -1) {
+  const n = find.matches.length;
+  if (!n) return;
+  find.index = (find.index + dir + n) % n;
+  refreshFind(true);
+}
+function openFind() {
+  const { from, to, empty } = editor.state.selection;
+  const sel = empty ? '' : editor.state.doc.textBetween(from, to, ' ');
+  if (sel && !sel.includes('\n')) findInput.value = sel;
+  findBar.hidden = false;
+  findInput.focus(); findInput.select();
+  find.query = findInput.value;
+  find.matches = computeMatches(editor.state.doc);
+  // Start at the first match after the cursor.
+  find.index = find.matches.findIndex(m => m.from >= from);
+  if (find.index < 0) find.index = find.matches.length ? 0 : -1;
+  refreshFind(true);
+}
+function closeFind() {
+  findBar.hidden = true;
+  const m = find.matches[find.index];
+  find.query = ''; find.index = -1;
+  refreshFind();
+  if (m) editor.commands.setTextSelection(m);
+  editor.commands.focus();
+}
+function isFindShortcut(e: KeyboardEvent) {
+  return (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f';
+}
+function findKeyDown(e: KeyboardEvent): boolean {
+  if (isFindShortcut(e)) { e.stopPropagation(); openFind(); return true; }
+  if (!findBar.hidden && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') { e.stopPropagation(); step(e.shiftKey ? -1 : 1); return true; }
+  if (e.key === 'Escape' && !findBar.hidden && !slash) { closeFind(); return true; }
+  return false;
+}
+findInput.addEventListener('input', () => {
+  find.query = findInput.value;
+  find.matches = computeMatches(editor.state.doc);
+  find.index = find.matches.length ? 0 : -1;
+  refreshFind(true);
+});
+findBar.addEventListener('keydown', e => {
+  // Keep these keys from being forwarded to VS Code by the webview wrapper.
+  if (isFindShortcut(e)) { e.preventDefault(); e.stopPropagation(); findInput.select(); return; }
+  if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+  else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); e.stopPropagation(); step(e.shiftKey ? -1 : 1); }
+  else if (e.altKey && e.code === 'KeyC') { e.preventDefault(); findCase.click(); }
+});
+findCase.addEventListener('click', () => {
+  find.caseSensitive = !find.caseSensitive;
+  findCase.classList.toggle('on', find.caseSensitive);
+  find.matches = computeMatches(editor.state.doc);
+  find.index = find.matches.length ? 0 : -1;
+  refreshFind(true);
+  findInput.focus();
+});
+$('#find-next').addEventListener('click', () => { step(1); findInput.focus(); });
+$('#find-prev').addEventListener('click', () => { step(-1); findInput.focus(); });
+$('#find-close').addEventListener('click', closeFind);
+// Cmd+F outside the editor content (e.g. empty area) should open the bar too.
+document.addEventListener('keydown', e => {
+  if (isFindShortcut(e)) { e.preventDefault(); e.stopPropagation(); openFind(); }
+});
 
 /* ---------- Undo / redo ----------
    VS Code's webview wrapper forwards every Cmd/Ctrl+Z/Y to the workbench, which also undoes the

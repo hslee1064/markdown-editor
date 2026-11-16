@@ -149,3 +149,21 @@ body.vscode-light .hljs-title, body.vscode-light .hljs-title.function_, body.vsc
 body.vscode-light .hljs-title.class_ { color: #267f99; }
 body.vscode-light .hljs-variable, body.vscode-light .hljs-template-variable, body.vscode-light .hljs-params, body.vscode-light .hljs-property, body.vscode-light .hljs-attr { color: #001080; }
 body.vscode-light .hljs-meta, body.vscode-light .hljs-tag, body.vscode-light .hljs-name { color: #af00db; }
+
+/* Find bar */
+#find {
+  position: fixed; top: 8px; right: 16px; z-index: 60; display: flex; align-items: center; gap: 2px;
+  padding: 4px 4px 4px 6px; border-radius: 6px;
+}
+#find input {
+  width: 220px; padding: 4px 6px; border-radius: 4px; outline: none;
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+}
+#find input:focus { border-color: var(--vscode-focusBorder); }
+#find.none input { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
+#find button { height: 24px; min-width: 24px; padding: 0 5px; font-size: 12px; }
+#find-count { font-size: 12px; color: var(--muted); min-width: 68px; padding: 0 6px; white-space: nowrap; }
+#find.none #find-count { color: var(--vscode-errorForeground); }
+.find-match { background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, .33)); border-radius: 2px; }
+.find-match.current { background: var(--vscode-editor-findMatchBackground, rgba(255, 150, 50, .6)); outline: 1px solid var(--vscode-editor-findMatchBorder, transparent); }

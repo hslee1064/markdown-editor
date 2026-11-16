@@ -28,7 +28,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     return vscode.window.registerCustomEditorProvider(
       MarkdownEditorProvider.viewType,
       new MarkdownEditorProvider(context),
-      { webviewOptions: { retainContextWhenHidden: true, enableFindWidget: true } }
+      { webviewOptions: { retainContextWhenHidden: true } }
     );
   }
 
@@ -111,6 +111,14 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     ${btn('bold', 'Bold', 'bold')}${btn('italic', 'Italic', 'italic')}${btn('strike', 'Strikethrough', 'strike')}${btn('code', 'Inline code', 'code')}${btn('link', 'Link', 'link')}
   </div>
   <div id="slash" class="floating" hidden></div>
+  <div id="find" class="floating" hidden>
+    <input id="find-input" type="text" placeholder="Find" spellcheck="false">
+    <button id="find-case" title="Match Case (Alt+C)">Aa</button>
+    <span id="find-count">No results</span>
+    <button id="find-prev" title="Previous Match (Shift+Enter)">↑</button>
+    <button id="find-next" title="Next Match (Enter)">↓</button>
+    <button id="find-close" title="Close (Escape)">✕</button>
+  </div>
   <script nonce="${nonce}" src="${script}"></script>
 </body></html>`;
   }
