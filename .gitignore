@@ -2,3 +2,5 @@ node_modules
 out
 *.vsix
 media/dist
+webview/*.js
+webview/*.js.map
