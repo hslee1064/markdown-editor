@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildPrintHtml, findBrowser, printToPdf } from './pdfExport';
+import type { Reveal } from './searchView';
 
 const svg = (d: string) =>
   `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -28,8 +29,7 @@ const ICONS: Record<string, string> = {
 export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'markdownEditor.editor';
 
-  static register(context: vscode.ExtensionContext): vscode.Disposable {
-    const provider = new MarkdownEditorProvider(context);
+  static register(context: vscode.ExtensionContext, provider = new MarkdownEditorProvider(context)): vscode.Disposable {
     return vscode.Disposable.from(
       vscode.window.registerCustomEditorProvider(MarkdownEditorProvider.viewType, provider,
         { webviewOptions: { retainContextWhenHidden: true } }),
@@ -37,7 +37,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     );
   }
 
-  private readonly panels = new Set<{ panel: vscode.WebviewPanel; document: vscode.TextDocument; docDir?: vscode.Uri }>();
+  private readonly panels = new Set<{ panel: vscode.WebviewPanel; document: vscode.TextDocument; docDir?: vscode.Uri; ready?: boolean }>();
+  /** Reveals waiting for an editor that is still loading, keyed by document URI. */
+  private readonly pendingReveal = new Map<string, Reveal>();
+
+  /** Open `uri` in the Markdown Editor and scroll to / highlight a search match. */
+  async reveal(uri: vscode.Uri, r: Reveal, preserveFocus: boolean): Promise<void> {
+    const key = uri.toString();
+    this.pendingReveal.set(key, r);
+    await vscode.commands.executeCommand('vscode.openWith', uri, MarkdownEditorProvider.viewType, { preserveFocus, preview: true });
+    const entry = [...this.panels].find(e => e.document.uri.toString() === key && e.ready);
+    if (entry && this.pendingReveal.has(key)) {
+      // Already loaded: deliver now. Otherwise the 'ready' handler sends it with 'init'.
+      this.pendingReveal.delete(key);
+      entry.panel.webview.postMessage({ type: 'reveal', reveal: r });
+    }
+  }
   private readonly pendingHtml = new Map<string, (html: string) => void>();
 
   /** Export the focused editor's rendered content to PDF via a headless Chromium browser. */
@@ -140,14 +155,18 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       watcher.onDidChange(() => reload().catch(() => undefined));
       disposables.push(watcher);
     }
-    const entry = { panel, document, docDir };
+    const entry = { panel, document, docDir, ready: false };
     this.panels.add(entry);
     panel.onDidDispose(() => { this.panels.delete(entry); disposables.forEach(d => d.dispose()); });
 
     panel.webview.onDidReceiveMessage(msg => {
       if (msg.type === 'ready') {
+        entry.ready = true;
+        const reveal = this.pendingReveal.get(document.uri.toString());
+        this.pendingReveal.delete(document.uri.toString());
         panel.webview.postMessage({
           type: 'init',
+          reveal,
           text: document.getText(),
           baseUri: docDir ? panel.webview.asWebviewUri(docDir).toString() : '',
           view: this.getViewState(document.uri),

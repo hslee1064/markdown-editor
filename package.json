@@ -2,7 +2,7 @@
   "name": "markdown-editor",
   "displayName": "Markdown Editor",
   "description": "Notion-style WYSIWYG Markdown editor with live formatting",
-  "version": "0.0.1",
+  "version": "0.0.5",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -36,6 +36,40 @@
         "title": "Export to PDF",
         "category": "Markdown Editor",
         "icon": "$(file-pdf)"
+      },
+      {
+        "command": "markdownEditor.search.focus",
+        "title": "Search in Files",
+        "category": "Markdown Search"
+      },
+      {
+        "command": "markdownEditor.search.focusReplace",
+        "title": "Replace in Files",
+        "category": "Markdown Search"
+      },
+      {
+        "command": "markdownEditor.search.refresh",
+        "title": "Refresh",
+        "category": "Markdown Search",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "markdownEditor.search.clear",
+        "title": "Clear Search Results",
+        "category": "Markdown Search",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "markdownEditor.search.collapseAll",
+        "title": "Collapse All",
+        "category": "Markdown Search",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "markdownEditor.search.expandAll",
+        "title": "Expand All",
+        "category": "Markdown Search",
+        "icon": "$(expand-all)"
       }
     ],
     "menus": {
@@ -56,6 +90,28 @@
           "command": "markdownEditor.exportPdf",
           "when": "activeCustomEditorId == markdownEditor.editor"
         }
+      ],
+      "view/title": [
+        {
+          "command": "markdownEditor.search.refresh",
+          "when": "view == markdownEditor.search",
+          "group": "navigation@0"
+        },
+        {
+          "command": "markdownEditor.search.clear",
+          "when": "view == markdownEditor.search",
+          "group": "navigation@1"
+        },
+        {
+          "command": "markdownEditor.search.collapseAll",
+          "when": "view == markdownEditor.search",
+          "group": "navigation@2"
+        },
+        {
+          "command": "markdownEditor.search.expandAll",
+          "when": "view == markdownEditor.search",
+          "group": "navigation@3"
+        }
       ]
     },
     "configuration": {
@@ -67,7 +123,37 @@
           "description": "Path to a Chromium-based browser (Chrome, Edge, Chromium) used for PDF export. Leave empty to detect automatically."
         }
       }
-    }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "markdownEditorSearch",
+          "title": "Markdown Search",
+          "icon": "media/search-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "markdownEditorSearch": [
+        {
+          "type": "webview",
+          "id": "markdownEditor.search",
+          "name": "Search"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "markdownEditor.search.focus",
+        "key": "ctrl+alt+shift+f",
+        "mac": "cmd+alt+shift+f"
+      },
+      {
+        "command": "markdownEditor.search.focusReplace",
+        "key": "ctrl+alt+shift+h",
+        "mac": "cmd+alt+shift+h"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./ && npm run build:webview",

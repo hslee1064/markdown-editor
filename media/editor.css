@@ -166,4 +166,9 @@ body.vscode-light .hljs-meta, body.vscode-light .hljs-tag, body.vscode-light .hl
 #find-count { font-size: 12px; color: var(--muted); min-width: 68px; padding: 0 6px; white-space: nowrap; }
 #find.none #find-count { color: var(--vscode-errorForeground); }
 .find-match { background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, .33)); border-radius: 2px; }
-.find-match.current { background: var(--vscode-editor-findMatchBackground, rgba(255, 150, 50, .6)); outline: 1px solid var(--vscode-editor-findMatchBorder, transparent); }
+.find-match.current {
+  background: var(--vscode-editor-findMatchBackground, rgba(255, 150, 50, .6));
+  box-shadow: 0 0 0 2px var(--vscode-editor-findMatchBorder, var(--vscode-focusBorder));
+}
+.find-match.current.pulse { animation: find-pulse .6s ease-out; }
+@keyframes find-pulse { 0% { box-shadow: 0 0 0 6px var(--vscode-focusBorder); } 100% { box-shadow: 0 0 0 2px var(--vscode-editor-findMatchBorder, var(--vscode-focusBorder)); } }

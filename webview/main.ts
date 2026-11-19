@@ -73,7 +73,8 @@ const CodeBlock = CodeBlockLowlight.extend({
 /* ---------- Find (Cmd/Ctrl+F) ---------- */
 type Match = { from: number; to: number };
 const findKey = new PluginKey<DecorationSet>('find');
-const find = { query: '', caseSensitive: false, matches: [] as Match[], index: -1 };
+// `only`: highlight just the current match without the find bar (used when jumping from the search panel).
+const find = { query: '', caseSensitive: false, matches: [] as Match[], index: -1, only: false };
 
 function computeMatches(doc: import('@tiptap/pm/model').Node): Match[] {
   if (!find.query) return [];
@@ -108,8 +109,9 @@ const FindHighlight = Extension.create({
           if (!tr.docChanged && !tr.getMeta(findKey)) return old;
           find.matches = computeMatches(tr.doc);
           if (find.index >= find.matches.length) find.index = find.matches.length - 1;
-          return DecorationSet.create(tr.doc, find.matches.map((m, i) =>
-            Decoration.inline(m.from, m.to, { class: i === find.index ? 'find-match current' : 'find-match' })));
+          const shown = find.only ? find.matches.filter((_, i) => i === find.index) : find.matches;
+          return DecorationSet.create(tr.doc, shown.map(m =>
+            Decoration.inline(m.from, m.to, { class: m === find.matches[find.index] ? 'find-match current' : 'find-match' })));
         },
       },
       props: { decorations: state => findKey.getState(state) },
@@ -276,7 +278,9 @@ window.addEventListener('message', e => {
   const msg = e.data;
   if (msg.type === 'init') baseUri = msg.baseUri ?? '';
   if (msg.type === 'init' || msg.type === 'update') setFromHost(msg.text);
-  if (msg.type === 'init' && msg.view) restoreView(msg.view);
+  if (msg.type === 'init' && msg.view && !msg.reveal) restoreView(msg.view);
+  // Wait for layout so the match can be scrolled into view.
+  if (msg.reveal) requestAnimationFrame(() => requestAnimationFrame(() => { revealMatch(msg.reveal); viewReady = true; }));
   if (msg.type === 'exportHtml') vscode.postMessage({ type: 'exportHtml', id: msg.id, html: exportHtml() });
 });
 
@@ -318,7 +322,7 @@ function restoreView(v: ViewState) {
   }));
 }
 scroller.addEventListener('scroll', saveView, { passive: true });
-window.addEventListener('message', e => { if (e.data?.type === 'init' && !e.data.view) viewReady = true; });
+window.addEventListener('message', e => { if (e.data?.type === 'init' && !e.data.view && !e.data.reveal) viewReady = true; });
 
 /* ---------- PDF export: snapshot of the rendered document (keeps syntax highlighting) ---------- */
 function exportHtml(): string {
@@ -474,9 +478,14 @@ function refreshFind(scroll = false) {
   editor.view.dispatch(editor.state.tr.setMeta(findKey, true).setMeta('addToHistory', false));
   updateFindLabel();
   if (scroll && find.index >= 0) {
-    const m = find.matches[find.index];
-    const dom = editor.view.domAtPos(m.from).node as HTMLElement;
-    (dom.nodeType === 1 ? dom : dom.parentElement)?.scrollIntoView({ block: 'center' });
+    const cur = editor.view.dom.querySelector<HTMLElement>('.find-match.current');
+    if (cur) {
+      const r = cur.getBoundingClientRect();
+      // Only scroll when the match is off-screen (or under the find bar), so stepping within view doesn't jump.
+      if (r.top < 48 || r.bottom > window.innerHeight - 16) cur.scrollIntoView({ block: 'center' });
+      // Briefly pulse so the newly selected match is easy to spot.
+      cur.classList.remove('pulse'); void cur.offsetWidth; cur.classList.add('pulse');
+    }
   }
 }
 function updateFindLabel() {
@@ -491,6 +500,7 @@ function step(dir: 1 | -1) {
   refreshFind(true);
 }
 function openFind() {
+  if (find.only) { find.only = false; find.caseSensitive = findCase.classList.contains('on'); }
   const { from, to, empty } = editor.state.selection;
   const sel = empty ? '' : editor.state.doc.textBetween(from, to, ' ');
   if (sel && !sel.includes('\n')) findInput.value = sel;
@@ -503,6 +513,32 @@ function openFind() {
   if (find.index < 0) find.index = find.matches.length ? 0 : -1;
   refreshFind(true);
 }
+/** Show a match picked in the search panel: open the find bar on it so Enter continues from there. */
+type Reveal = { query: string; caseSensitive: boolean; occurrence: number; total: number; offset: number; length: number };
+function revealMatch(r: Reveal) {
+  if (!findBar.hidden) { findBar.hidden = true; findCase.classList.toggle('on', false); }
+  find.query = r.query; find.caseSensitive = r.caseSensitive; find.only = true;
+  find.matches = computeMatches(editor.state.doc);
+  const n = find.matches.length;
+  if (!n) { find.index = -1; refreshFind(); return; }
+  if (n === r.total) find.index = r.occurrence;
+  else {
+    // Rendering hid or added some occurrences (e.g. inside link URLs): pick the one at the closest relative position.
+    const target = (r.offset / Math.max(1, r.length)) * editor.state.doc.content.size;
+    find.index = find.matches.reduce((best, m, i) => Math.abs(m.from - target) < Math.abs(find.matches[best].from - target) ? i : best, 0);
+  }
+  const m = find.matches[find.index];
+  editor.chain().setMeta('addToHistory', false).setTextSelection(m).run();
+  refreshFind(true);
+}
+/** Drop the search-panel highlight once the user starts interacting with the document. */
+function clearReveal() {
+  if (!find.only) return;
+  find.only = false; find.query = ''; find.index = -1; find.caseSensitive = findCase.classList.contains('on');
+  refreshFind();
+}
+editor.view.dom.addEventListener('mousedown', clearReveal, true);
+editor.view.dom.addEventListener('keydown', clearReveal, true);
 function closeFind() {
   findBar.hidden = true;
   const m = find.matches[find.index];
